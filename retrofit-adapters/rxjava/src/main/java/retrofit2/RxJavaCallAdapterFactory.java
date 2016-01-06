@@ -18,6 +18,7 @@ package retrofit2;
 import java.lang.annotation.Annotation;
 import java.lang.reflect.ParameterizedType;
 import java.lang.reflect.Type;
+import java.util.Collections;
 import rx.Observable;
 import rx.Subscriber;
 import rx.exceptions.Exceptions;
@@ -149,12 +150,32 @@ public final class RxJavaCallAdapterFactory implements CallAdapter.Factory {
       return responseType;
     }
 
+    protected <T> Observable<Response<Iterable<T>>> createResponseObservableFromCall(Call<T> call) {
+      return Observable.create(new CallOnSubscribe<>(call))
+          .map(new Func1<Response<T>, Response<Iterable<T>>>() {
+            @Override
+            public Response<Iterable<T>> call(Response<T> originalResponse) {
+              if (originalResponse.isSuccess()) {
+                if (originalResponse.body() instanceof Iterable) {
+                  return (Response<Iterable<T>>) originalResponse;
+                }
+                else {
+                  return Response.success((Iterable<T>)Collections.singletonList(originalResponse.body()), originalResponse.raw());
+                }
+              }
+              else {
+                return Response.error(originalResponse.code(), originalResponse.errorBody());
+              }
+            }
+          });
+    }
+
     @Override public <R> Observable<R> adapt(Call<R> call) {
-      return Observable.create(new CallOnSubscribe<>(call)) //
-          .flatMap(new Func1<Response<R>, Observable<R>>() {
-            @Override public Observable<R> call(Response<R> response) {
+      return createResponseObservableFromCall(call) //
+          .flatMap(new Func1<Response<Iterable<R>>, Observable<R>>() {
+            @Override public Observable<R> call(Response<Iterable<R>> response) {
               if (response.isSuccess()) {
-                return Observable.just(response.body());
+                return Observable.from(response.body());
               }
               return Observable.error(new HttpException(response));
             }
